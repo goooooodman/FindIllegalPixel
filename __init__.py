@@ -26,6 +26,10 @@ import os
 import tempfile
 import sys
 
+import math
+import time
+import numpy as np
+
 import qrenderdoc as qrd
 import renderdoc as rd
 
@@ -53,64 +57,100 @@ last_resource_id = -1
 last_illegal_index = -1
 last_illegal_array = []
 
+def illegal_check(pixel):
+    return math.isnan(pixel) or math.isinf(pixel) or pixel < 0
+    # return np.isnan(pixel) or np.isinf(pixel) or pixel < 0 # too slow
+
+def collect_illegal_pixel(image):
+    global last_illegal_array
+    illegal_result = np.isfinite(image)
+
+    zero_array = np.zeros(image.shape, dtype = float, order = 'C')
+    negative_result = np.less(image, zero_array)
+
+    rows, cols, channels = image.shape
+
+    # too slow
+    # for i in range(rows):
+    #     for j in range(cols):
+    #         x = j
+    #         y = i
+    #         for n in range(channels):
+    #             if illegal_check(image[i, j, n]):
+    #                 last_illegal_array.append((x, y))
+    #                 break
+
+    for i in range(rows):
+        for j in range(cols):
+            x = j
+            y = i
+            for n in range(channels):
+                if not illegal_result[i, j, n] or negative_result[i, j, n]:
+                    last_illegal_array.append((x, y))
+                    break
+
+def find_illegal_pixel(controller: rd.ReplayController):
+    global last_event
+    global last_resource_id
+    global last_illegal_index
+    global last_illegal_array
+    texture_viewer = pyrenderdoc.GetTextureViewer()
+
+    # print("----------------------------------------------------")
+    # print("pyrenderdoc.CurEvent() = %s" % pyrenderdoc.CurEvent())
+    # print("last_event = %s" % last_event)
+    # print("texture_viewer.GetCurrentResource() = %s" % texture_viewer.GetCurrentResource())
+    # print("last_resource_id = %s" % last_resource_id)
+    # print("----------------------------------------------------")
+
+    if last_event != pyrenderdoc.CurEvent() or last_resource_id != texture_viewer.GetCurrentResource():
+
+        last_event = pyrenderdoc.CurEvent()
+        last_resource_id = texture_viewer.GetCurrentResource()
+        last_illegal_index = -1
+        last_illegal_array = []
+
+        texsave = rd.TextureSave()
+        texsave.resourceId = texture_viewer.GetCurrentResource()
+
+        tmpfd, tempfilename = tempfile.mkstemp()
+
+        filename = tempfilename + ".exr"
+
+        print("----------------------------------------------------")
+        print("Saving images of %s" % filename)
+        print("----------------------------------------------------")
+
+        texsave.mip = 0
+        texsave.slice.sliceIndex = 0
+
+        texsave.destType = rd.FileType.EXR
+        controller.SaveTexture(texsave, filename)
+
+        image = cv2.imread(str(filename), cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH)
+
+        # time_start=time.time()
+        collect_illegal_pixel(image)
+        # time_end=time.time()
+        
+        # print("----------------------------------------------------")
+        # print('totally cost',time_end-time_start)
+        # print("----------------------------------------------------")
+
+        os.remove(filename)
+
+    if len(last_illegal_array) <= 0:
+        print("未找到非法像素!")
+    else:
+        last_illegal_index = last_illegal_index + 1
+        if last_illegal_index >= len(last_illegal_array):
+            last_illegal_index = 0
+
+        x, y = last_illegal_array[last_illegal_index]
+        texture_viewer.GotoLocation(x, y)
+        print("找到非法像素 (%s, %s)!" % (x, y))
+
 def open_Panel_callback(ctx: qrd.CaptureContext, data):
-    def find_illegal_pixel(controller: rd.ReplayController):
-        global last_event
-        global last_resource_id
-        global last_illegal_index
-        global last_illegal_array
-        texture_viewer = pyrenderdoc.GetTextureViewer()
-
-        if last_event != pyrenderdoc.CurEvent() or last_resource_id != texture_viewer.GetCurrentResource():
-
-            last_event = pyrenderdoc.CurEvent()
-            last_resource_id = texture_viewer.GetCurrentResource()
-            last_illegal_index = -1
-            last_illegal_array = []
-
-            texsave = rd.TextureSave()
-            texsave.resourceId = texture_viewer.GetCurrentResource()
-
-            tmpfd, tempfilename = tempfile.mkstemp()
-
-            filename = tempfilename + ".exr"
-
-            print("----------------------------------------------------")
-            print("Saving images of %s" % filename)
-            print("----------------------------------------------------")
-
-            texsave.mip = 0
-            texsave.slice.sliceIndex = 0
-
-            texsave.destType = rd.FileType.EXR
-            controller.SaveTexture(texsave, filename)
-
-            image = cv2.imread(str(filename), cv2.IMREAD_UNCHANGED | cv2.IMREAD_ANYDEPTH)
-            def collect_illegal_pixel(image):
-                rows, cols, channels = image.shape
-                for i in range(rows):
-                    for j in range(cols):
-                        x = j
-                        y = i
-                        for n in range(channels):
-                            if str(image[i, j, n]).lower() == "nan" or str(image[i, j, n]).lower() == "inf":
-                                last_illegal_array.append((x, y))
-                                break
-
-            collect_illegal_pixel(image)
-            os.remove(filename)
-
-        if len(last_illegal_array) <= 0:
-            print("未找到非法像素!")
-        else:
-            last_illegal_index = last_illegal_index + 1
-            if last_illegal_index >= len(last_illegal_array):
-                last_illegal_index = 0
-
-            x, y = last_illegal_array[last_illegal_index]
-            texture_viewer.GotoLocation(x, y)
-            print("找到非法像素 (%s, %s)!" % (x, y))
-
     ctx.Replay().BlockInvoke(find_illegal_pixel)
 
 def register(version: str, ctx: qrd.CaptureContext):
