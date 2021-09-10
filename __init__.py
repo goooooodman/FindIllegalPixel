@@ -25,10 +25,8 @@
 import os
 import tempfile
 import sys
-
 import math
 import time
-import numpy as np
 
 import qrenderdoc as qrd
 import renderdoc as rd
@@ -49,6 +47,7 @@ if not contain:
         sys.path.append("%s/FindIllegalPixel/package" % path)
 
 import cv2
+import numpy as np
 
 extiface_version = ''
 
