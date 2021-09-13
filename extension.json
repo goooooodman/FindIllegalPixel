@@ -3,7 +3,7 @@
 	"name": "Find Illegal Pixel",
 	"version": "1.0",
 	"minimum_renderdoc": "1.13",
-	"description": "",
+	"description": "Find an illegal pixel and locate it automatically",
 	"author": "yinlongfei <yinlongfei@hotmail.com>",
-	"url": ""
+	"url": "https://github.com/goooooodman/FindIllegalPixel"
 }
